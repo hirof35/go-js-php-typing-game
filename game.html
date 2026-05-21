@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>3層連携 タイピングゲーム (タイムリミット版)</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding-top: 50px; background: #edf2f7; }
+        .container { background: white; max-width: 500px; margin: 0 auto; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        #word { font-size: 32px; font-weight: bold; letter-spacing: 2px; margin-bottom: 20px; color: #2d3748; }
+        #input { font-size: 24px; padding: 8px; width: 80%; text-align: center; border: 2px solid #cbd5e0; border-radius: 4px; }
+        #input:focus { border-color: #4299e1; outline: none; }
+        #info { margin-top: 20px; color: #718096; display: flex; justify-content: space-between; padding: 0 40px; font-weight: bold; }
+        #timer { color: #e53e3e; } /* タイマーは赤色 */
+        button { padding: 10px 20px; font-size: 18px; cursor: pointer; background: #4299e1; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #3182ce; }
+        .gameover-title { color: #e53e3e; }
+        .clear-title { color: #38a169; }
+    </style>
+</head>
+<body>
+<div class="container" id="game-box">
+    <h1>タイピングゲーム (5問)</h1>
+    <p>制限時間: <strong>30秒</strong></p>
+    <button id="start-btn">ゲームスタート</button>
+</div>
+
+<script>
+    const PHP_API_BASE = "http://localhost"; 
+    
+    let words = [];
+    let currentIndex = 0;
+    let startTime;
+    let timerInterval; // タイマー用のインターバル変数
+    const LIMIT_TIME = 30; // 制限時間（秒）
+
+    const gameBox = document.getElementById("game-box");
+
+    // 1. スタートボタン（PHPから単語リストを取得）
+    document.addEventListener("click", async (e) => {
+        if (e.target.id === "start-btn") {
+            try {
+                const response = await fetch(`${PHP_API_BASE}/php_code/go-js-php-typing-game/game.php/api/words`);
+                const data = await response.json();
+                words = data.words;
+                currentIndex = 0;
+                
+                renderScreen();
+                startTime = Date.now();
+                startTimer(); // タイマースタート
+            } catch (err) {
+                alert("APIからのデータ取得に失敗しました。PHPやGoが起動しているか確認してください。");
+            }
+        }
+    });
+
+    // 2. 画面の描画
+    function renderScreen() {
+        gameBox.innerHTML = `
+            <h1>タイピングゲーム</h1>
+            <div id="word">${words[currentIndex]}</div>
+            <input type="text" id="input" autocomplete="off" autofocus>
+            <div id="info">
+                <div>第 <span id="current">${currentIndex + 1}</span> / 5 問</div>
+                <div>残り時間: <span id="timer">${LIMIT_TIME}</span> 秒</div>
+            </div>
+        `;
+        document.getElementById("input").addEventListener("input", handleInput);
+    }
+
+    // 3. カウントダウンタイマーの処理
+    function startTimer() {
+        timerInterval = setInterval(() => {
+            const elapsedTime = (Date.now() - startTime) / 1000;
+            const remainingTime = Math.max(0, LIMIT_TIME - elapsedTime).toFixed(1);
+            
+            const timerDisplay = document.getElementById("timer");
+            if (timerDisplay) {
+                timerDisplay.textContent = remainingTime;
+            }
+
+            // 時間切れ（ゲームオーバー）の判定
+            if (elapsedTime >= LIMIT_TIME) {
+                clearInterval(timerInterval); // タイマー停止
+                renderGameOver();
+            }
+        }, 100); // 0.1秒ごとに更新して滑らかにする
+    }
+
+    // 4. キー入力判定
+    function handleInput(e) {
+        if (e.target.value === words[currentIndex]) {
+            currentIndex++;
+            if (currentIndex < words.length) {
+                renderScreen();
+            } else {
+                // 5問すべて打ち終わった（ゲームクリア）
+                clearInterval(timerInterval); // タイマー停止
+                const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                sendScore(totalTime);
+            }
+        }
+    }
+
+    // 5. ゲームオーバー画面の表示
+    function renderGameOver() {
+        gameBox.innerHTML = `
+            <h2 class="gameover-title">タイムアップ！ ✕</h2>
+            <p>30秒以内にクリアできませんでした...</p>
+            <button onclick="location.reload()">リトライ</button>
+        `;
+    }
+
+    // 6. スコア送信（ゲームクリア時・PHP経由でGoへ）
+    async function sendScore(time) {
+        gameBox.innerHTML = `<h2>結果を送信中...</h2>`;
+        
+        try {
+            const response = await fetch(`${PHP_API_BASE}/php_code/go-js-php-typing-game/game.php/api/word`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ time: parseFloat(time) })
+            });
+            const result = await response.json();
+
+            gameBox.innerHTML = `
+                <h2 class="clear-title">ゲームクリア！ 🎉</h2>
+                <p>クリアタイム: <strong>${result.time}</strong> 秒</p>
+                <p style="color: #4a5568; font-weight: bold;">${result.message}</p>
+                <button onclick="location.reload()">もう一度プレイ</button>
+            `;
+        } catch (err) {
+            gameBox.innerHTML = `<h2>エラーが発生しました</h2>`;
+        }
+    }
+</script>
+</body>
+</html>
